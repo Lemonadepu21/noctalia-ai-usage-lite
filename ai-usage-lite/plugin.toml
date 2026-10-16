@@ -1,12 +1,30 @@
 id = "pupu/ai-usage-lite"
 name = "AI Usage Lite"
-version = "0.2.2"
+version = "0.3.0"
 plugin_api = 32
 author = "pupu"
 license = "MIT"
 icon = "brain"
 description = "Codex 与 OpenCode Go 用量；由已安装的 ai-usagebar CLI 查询。"
 dependencies = ["ai-usagebar", "flock", "timeout"]
+
+[[setting]]
+key = "refresh_minutes"
+type = "int"
+label_key = "settings.refresh.label"
+description_key = "settings.refresh.description"
+default = 5
+min = 1
+max = 120
+
+[[setting]]
+key = "timeout_seconds"
+type = "int"
+label_key = "settings.timeout.label"
+description_key = "settings.timeout.description"
+default = 30
+min = 5
+max = 55
 
 [[service]]
 id = "poller"
@@ -15,6 +33,22 @@ entry = "service.luau"
 [[widget]]
 id = "bar"
 entry = "bar.luau"
+
+[[widget.setting]]
+key = "show_countdown"
+type = "bool"
+label_key = "settings.countdown.label"
+description_key = "settings.countdown.description"
+default = true
+
+[[widget.setting]]
+key = "progress_width"
+type = "int"
+label_key = "settings.width.label"
+description_key = "settings.width.description"
+default = 40
+min = 24
+max = 100
 
 [[panel]]
 id = "panel"

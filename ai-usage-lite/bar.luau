@@ -7,8 +7,10 @@ function update()
     local entry = snapshot.providers and snapshot.providers.openai
     local errorText = model.health(snapshot, noctalia.state.get("heartbeat"), time)
         or (snapshot.errors and snapshot.errors.openai)
-    local stale = entry and (entry.stale or time - entry.fetched > 600 or errorText)
-    local signature = { entry and "data" or tostring(snapshot.busy) }
+    local stale = entry and (entry.stale or time - entry.fetched > model.refreshSeconds() * 2 or errorText)
+    local width = model.settingInt("progress_width", 40, 24, 100)
+    local countdown = noctalia.getConfig("show_countdown") ~= false
+    local signature = { entry and "data" or tostring(snapshot.busy), tostring(width), tostring(countdown) }
     local rows, tips = {}, { "Codex · 剩余额度\n上：5 小时 · 下：每周\n点击查看详情 · 右键刷新" }
     if entry then
         for i, metric in ipairs(entry.metrics) do
@@ -16,15 +18,18 @@ function update()
             local role = remaining <= 10 and "error" or i == 1 and "primary" or "secondary"
             local reset = model.duration(metric.reset, time):gsub("小时", "h"):gsub("天", "d"):gsub("分", "m")
             if not metric.reset then reset = "—" elseif metric.reset <= time then reset = "0m" end
-            signature[#signature + 1] = string.format("%s/%s/%s", metric.percent, reset, metric.reset)
-            rows[#rows + 1] = ui.row({ key = "window-" .. i, gap = 5, height = 10, align = "center" }, {
-                ui.progress({ key = "progress", progress = remaining / 100, width = 40, height = 4,
+            signature[#signature + 1] = string.format("%s/%s", metric.percent, countdown and reset or "")
+            local cells = {
+                ui.progress({ key = "progress", progress = remaining / 100, width = width, height = 4,
                     radius = 2, fill = role, track = "on_surface/0.12" }),
                 ui.label({ key = "percent", text = string.format("%.0f%%", remaining), width = 28,
                     fontSize = 13, fontWeight = "semibold", color = role, maxLines = 1 }),
-                ui.label({ key = "reset", text = reset, width = 44, fontSize = 11,
-                    color = "on_surface_variant", maxLines = 1 }),
-            })
+            }
+            if countdown then
+                cells[#cells + 1] = ui.label({ key = "reset", text = reset, width = 44, fontSize = 11,
+                    color = "on_surface_variant", maxLines = 1 })
+            end
+            rows[#rows + 1] = ui.row({ key = "window-" .. i, gap = 5, height = 10, align = "center" }, cells)
             tips[#tips + 1] = string.format("%s 剩余 %.0f%% · %s", metric.label, remaining, model.duration(metric.reset, time))
                 .. (metric.reset and ("\n重置 " .. noctalia.formatTime("%m-%d %H:%M", metric.reset)) or "")
         end

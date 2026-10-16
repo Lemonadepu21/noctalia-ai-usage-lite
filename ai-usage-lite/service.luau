@@ -4,6 +4,7 @@ local cachePath = dir and dir .. "/last-success.json"
 local snapshot = { providers = {}, errors = {}, busy = false }
 local running = false
 local serial, started, nextDue, lastTick = 0, -100, 0, 0
+local watchdogSeconds = 45
 
 local function now() return noctalia.nowMs() / 1000 end
 local function publish() noctalia.state.set("snapshot", snapshot) end
@@ -26,7 +27,9 @@ end
 local function refresh()
     local time = now()
     if running or (time >= started and time - started < 5) then return end
-    started, nextDue = time, time + 300
+    started, nextDue = time, time + model.refreshSeconds()
+    local timeoutSeconds = model.settingInt("timeout_seconds", 30, 5, 55)
+    watchdogSeconds = timeoutSeconds + 15
     if not dir then finish("无法创建插件数据目录"); return end
     serial = serial + 1
     local run = serial
@@ -34,10 +37,12 @@ local function refresh()
     publish()
     -- flock survives VM reloads; timeout bounds CLI lifetime even if its callback is lost.
     local accepted = noctalia.runAsync({ "flock", "-n", "-E", "75", dir .. "/query.lock",
-        "timeout", "-k", "2s", "30s", "ai-usagebar", "usage", "--json" }, function(result)
+        "timeout", "-k", "2s", tostring(timeoutSeconds) .. "s", "ai-usagebar", "usage", "--json" }, function(result)
         if serial ~= run then return end
         if type(result) ~= "table" then finish("CLI 未返回结果"); return end
-        if result.timedOut or result.exitCode == 124 or result.exitCode == 137 then finish("CLI 查询超时（30秒）"); return end
+        if result.timedOut or result.exitCode == 124 or result.exitCode == 137 then
+            finish("CLI 查询超时（" .. timeoutSeconds .. "秒）"); return
+        end
         if result.exitCode == 75 then nextDue = now() + 15; finish("上一次 CLI 查询尚未结束，稍后自动重试"); return end
         if result.exitCode ~= 0 then finish("CLI 查询失败，退出码 " .. tostring(result.exitCode)); return end
         if result.stdoutTruncated then finish("CLI 输出被截断"); return end
@@ -47,14 +52,14 @@ local function refresh()
         snapshot.providers, snapshot.errors, snapshot.checked = merged.providers, merged.errors, merged.checked
         save()
         finish(nil)
-    end, 35000)
+    end, (timeoutSeconds + 5) * 1000)
     if not accepted then finish("无法启动 CLI 查询"); return end
 end
 
 function update()
     local time = now()
     noctalia.state.set("heartbeat", time)
-    if running and (time - started > 45 or time < started - 30) then
+    if running and (time - started > watchdogSeconds or time < started - 30) then
         serial = serial + 1
         finish("查询回调失效，稍后自动重试")
         nextDue = time + 15
@@ -63,6 +68,11 @@ function update()
     local resumed = lastTick > 0 and (time - lastTick > 45 or time < lastTick - 30)
     lastTick = time
     if not running and (time >= nextDue or resumed) then refresh() end
+end
+
+function onConfigChanged()
+    nextDue = started + model.refreshSeconds()
+    update()
 end
 
 function onIpc(event)

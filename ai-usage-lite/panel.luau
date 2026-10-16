@@ -24,7 +24,7 @@ local function render()
     local entry = snapshot.providers and snapshot.providers[selected]
     lastHealth = model.health(snapshot, noctalia.state.get("heartbeat"), time)
     local errorText = lastHealth or (snapshot.errors and snapshot.errors[selected])
-    local stale = entry and (entry.stale or time - entry.fetched > 600 or errorText)
+    local stale = entry and (entry.stale or time - entry.fetched > model.refreshSeconds() * 2 or errorText)
     local cards = {}
     if entry then
         cards[#cards + 1] = ui.row({ key = "plan", align = "center", gap = 6 }, {

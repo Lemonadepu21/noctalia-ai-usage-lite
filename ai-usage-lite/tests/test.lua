@@ -60,9 +60,11 @@ assert(model.health({}, clock - 61, clock):find("无响应"))
 local function harness(cache)
     local state, watches, calls, writes = {}, {}, {}, {}
     local env = setmetatable({}, { __index = _G })
+    env.config = { refresh_minutes = 5, timeout_seconds = 30, progress_width = 40, show_countdown = true }
     local doc = { valid = report, partial = partial, cached = cache }
     local enabled = true
     env.noctalia = {
+        getConfig = function(key) return env.config[key] end,
         nowMs = function() return clock * 1000 end,
         pluginDataDir = function() return "/plugin-data" end,
         setUpdateInterval = function(ms) env.interval = ms end,
@@ -144,6 +146,35 @@ assert(not service.state.snapshot.busy and service.state.snapshot.error:find("�
 local restart = harness({ version = 1, providers = merged.providers }); restart.load("service")
 assert(restart.state.snapshot.providers.openai.stale)
 
+local configured = harness()
+configured.config.refresh_minutes, configured.config.timeout_seconds = 2, 55
+configured.load("service")
+assert(configured.calls[1].argv[9] == "55s" and configured.calls[1].timeout == 60000)
+configured.config.timeout_seconds = 5
+configured.onConfigChanged()
+assert(#configured.calls == 1, "settings change duplicated an in-flight query")
+for _ = 1, 4 do clock = clock + 15; configured.update() end
+assert(configured.state.snapshot.busy, "timeout change shortened the current query watchdog")
+configured.complete({ exitCode = 124 })
+assert(configured.state.snapshot.error:find("55秒"), "in-flight timeout was replaced")
+for _ = 1, 3 do clock = clock + 15; configured.update() end
+assert(#configured.calls == 1, "query started before configured interval")
+clock = clock + 15; configured.update()
+assert(#configured.calls == 2 and configured.calls[2].argv[9] == "5s" and configured.calls[2].timeout == 10000)
+configured.complete({ exitCode = 0, stdout = "valid" })
+configured.config.refresh_minutes = 1
+configured.onConfigChanged()
+assert(#configured.calls == 2)
+for _ = 1, 4 do clock = clock + 15; configured.update() end
+assert(#configured.calls == 3, "new refresh interval did not take effect")
+local bounded = harness()
+bounded.config.refresh_minutes, bounded.config.timeout_seconds = -1, 1000
+local configuredModel = bounded.require("./model.luau")
+assert(configuredModel.refreshSeconds() == 60)
+assert(configuredModel.settingInt("timeout_seconds", 30, 5, 55) == 55)
+bounded.config.refresh_minutes = 0/0
+assert(configuredModel.refreshSeconds() == 300)
+
 local panel = harness()
 panel.noctalia.state.set("snapshot", merged); panel.noctalia.state.set("heartbeat", clock)
 panel.load("panel"); assert(panel.renders == 0)
@@ -163,6 +194,12 @@ expiredPanel.noctalia.state.set("snapshot", expiredSnapshot); expiredPanel.nocta
 expiredPanel.load("panel"); expiredPanel.onOpen()
 assert(find(find(expiredPanel.tree, "expiry-1"), "icon").props.name == "clock-exclamation")
 assert(not find(find(expiredPanel.tree, "expiry-1"), "remaining"))
+local slowPanel = harness()
+slowPanel.config.refresh_minutes = 120
+local older = copy(merged); older.providers.openai.fetched = clock - 3600
+slowPanel.noctalia.state.set("snapshot", older); slowPanel.noctalia.state.set("heartbeat", clock)
+slowPanel.load("panel"); slowPanel.onOpen()
+assert(find(find(slowPanel.tree, "status"), "icon").props.name == "circle-check", "long refresh interval marked data stale too soon")
 local function checkTree(node, keys)
     assert(type(node.props.key) == "string", "unkeyed node")
     assert(not keys[node.props.key], "duplicate sibling key"); keys[node.props.key] = true
@@ -205,4 +242,11 @@ assert(#bar.barTree.children == 2 and not find(bar.barTree, "stale"))
 assert(bar.barTree.children[2].children[1].children[3].props.text == "0m")
 bar.onClick(); assert(bar.toggled == "pupu/ai-usage-lite:panel")
 bar.onRightClick(); assert(bar.state.refresh == 1)
-print("PASS: dates, schema, cache, timeout, single flight, watchdog, resume, 400 switches, stable callbacks, no timer panel renders, compact bar without stale icons, manual reset counts")
+bar.config.show_countdown, bar.config.progress_width = false, 72
+bar.update()
+assert(not find(bar.barTree.children[2].children[1], "reset"))
+assert(bar.barTree.children[2].children[1].children[1].props.width == 72)
+renders = bar.barRenders
+clock = clock + 60; bar.noctalia.state.set("heartbeat", clock); bar.update()
+assert(bar.barRenders == renders, "hidden countdown still redrew the bar")
+print("PASS: dates, schema, cache, configurable interval and timeout, in-flight settings, single flight, watchdog, resume, 400 switches, stable callbacks, no timer panel renders, configurable compact bar, manual reset counts")

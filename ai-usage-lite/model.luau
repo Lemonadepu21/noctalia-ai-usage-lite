@@ -10,6 +10,16 @@ local function count(value)
     return finite(value) and value >= 0 and value % 1 == 0 and value or nil
 end
 
+function M.settingInt(key, default, minimum, maximum)
+    local value = noctalia.getConfig(key)
+    if not finite(value) then return default end
+    return math.max(minimum, math.min(maximum, math.floor(value)))
+end
+
+function M.refreshSeconds()
+    return M.settingInt("refresh_minutes", 5, 1, 120) * 60
+end
+
 -- Calendar arithmetic keeps UTC independent of the machine's timezone and DST.
 function M.epoch(value)
     if type(value) ~= "string" then return nil end

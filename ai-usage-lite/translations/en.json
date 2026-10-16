@@ -1,0 +1,10 @@
+{
+  "settings.refresh.label": "Refresh interval (minutes)",
+  "settings.refresh.description": "Query both subscriptions every 1–120 minutes. Manual refresh is always available.",
+  "settings.timeout.label": "Query timeout (seconds)",
+  "settings.timeout.description": "Allow 5–55 seconds per CLI query. Changes apply to the next query.",
+  "settings.countdown.label": "Show reset countdown",
+  "settings.countdown.description": "Show time until reset beside each quota. Local reset times remain in the popup.",
+  "settings.width.label": "Progress bar width",
+  "settings.width.description": "Width of each quota progress bar, from 24 to 100 logical pixels."
+}
