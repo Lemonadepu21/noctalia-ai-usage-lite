@@ -1,0 +1,27 @@
+id = "pupu/ai-usage-lite"
+name = "AI Usage Lite"
+version = "0.2.2"
+plugin_api = 32
+author = "pupu"
+license = "MIT"
+icon = "brain"
+description = "Codex 与 OpenCode Go 用量；由已安装的 ai-usagebar CLI 查询。"
+dependencies = ["ai-usagebar", "flock", "timeout"]
+
+[[service]]
+id = "poller"
+entry = "service.luau"
+
+[[widget]]
+id = "bar"
+entry = "bar.luau"
+
+[[panel]]
+id = "panel"
+entry = "panel.luau"
+width = 440
+height = 480
+placement = "attached"
+position = "auto"
+open_near_click = true
+capture_keys = ["escape", "r", "left", "right"]
