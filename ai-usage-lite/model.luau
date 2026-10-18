@@ -115,6 +115,12 @@ function M.entry(raw, now, cached)
         end
     end
     if #entry.sections == 0 then return nil end
+    local occurrences = {}
+    for _, section in ipairs(entry.sections) do
+        local base = section.type .. ":" .. section.label
+        occurrences[base] = (occurrences[base] or 0) + 1
+        section.key = base .. ":" .. occurrences[base]
+    end
     local inventory = type(raw.reset_credits) == "table" and raw.reset_credits or {}
     local expiries, seen = {}, {}
     local credits = cached and raw.manualExpiries or inventory.credits
@@ -137,7 +143,7 @@ function M.merge(previous, report, now)
     if type(report) ~= "table" or report.schema_version ~= 1 or type(report.entries) ~= "table" then return nil end
     local result = { providers = {}, order = {}, errors = {}, checked = now,
         primary = validId(report.primary) and report.primary or nil,
-        barProvider = previous and previous.barProvider }
+        preferences = previous and previous.preferences }
     for i, raw in ipairs(report.entries) do
         if i > 128 then break end
         if type(raw) == "table" and validId(raw.id) and not result.providers[raw.id] then
@@ -177,33 +183,87 @@ function M.ids(snapshot)
     local ids, seen = {}, {}
     local providers = snapshot.providers or {}
     for _, id in ipairs(snapshot.order or {}) do
-        if providers[id] and not seen[id] then ids[#ids + 1] = id; seen[id] = true end
+        if providers[id] and providers[id].hasData and not seen[id] then ids[#ids + 1] = id; seen[id] = true end
     end
     local extra = {}
-    for id in pairs(providers) do if not seen[id] then extra[#extra + 1] = id end end
+    for id, entry in pairs(providers) do if entry.hasData and not seen[id] then extra[#extra + 1] = id end end
     table.sort(extra)
     for _, id in ipairs(extra) do ids[#ids + 1] = id end
     return ids
 end
 
-function M.barId(snapshot)
-    local providers = snapshot.providers or {}
-    if snapshot.barProvider and providers[snapshot.barProvider] then return snapshot.barProvider end
-    if providers.openai then return "openai" end
-    if type(snapshot.primary) == "string" and providers[snapshot.primary] then return snapshot.primary end
+function M.preferences(value)
+    local prefs = { sections = {} }
+    if type(value) ~= "table" then return prefs end
+    if type(value.tabs) == "table" then
+        prefs.tabs = {}
+        local seen = {}
+        for i, id in ipairs(value.tabs) do
+            if i > 128 then break end
+            if validId(id) and not seen[id] then prefs.tabs[#prefs.tabs + 1] = id; seen[id] = true end
+        end
+    end
+    local size = 0
+    for id, flags in pairs(type(value.sections) == "table" and value.sections or {}) do
+        size = size + 1; if size > 128 then break end
+        if validId(id) and type(flags) == "table" then
+            local cleaned, countFlags = {}, 0
+            for key, enabled in pairs(flags) do
+                countFlags = countFlags + 1; if countFlags > 128 then break end
+                if validId(key) and type(enabled) == "boolean" then cleaned[key] = enabled end
+            end
+            prefs.sections[id] = cleaned
+        end
+    end
+    return prefs
+end
+
+function M.tabIds(snapshot)
     local ids = M.ids(snapshot)
-    for _, id in ipairs(ids) do if providers[id].hasData then return id end end
-    return ids[1]
+    local configured = snapshot.preferences and snapshot.preferences.tabs
+    if not configured then return ids end
+    local shown, wanted = {}, {}
+    for _, id in ipairs(configured) do wanted[id] = true end
+    for _, id in ipairs(ids) do if wanted[id] then shown[#shown + 1] = id end end
+    return shown
+end
+
+function M.shown(entry, prefs, id, section)
+    local flags = prefs and prefs.sections and prefs.sections[id]
+    if flags and flags[section.key] ~= nil then return flags[section.key] end
+    if section.key == "manual-resets" then return true end
+    -- Codex's supplementary Credits block is not a separate configured API account.
+    return entry.brand ~= "openai" or (section.type == "metric" and section.headline == "percent")
+end
+
+function M.sections(entry, prefs, id)
+    local sections = {}
+    for _, section in ipairs(entry and entry.sections or {}) do
+        if not (entry.manualResets ~= nil and section.label == "Reset credits")
+            and M.shown(entry, prefs, id, section) then sections[#sections + 1] = section end
+    end
+    return sections
+end
+
+function M.barId(snapshot, requested)
+    local providers = snapshot.providers or {}
+    if type(requested) == "string" and requested ~= "" then
+        return providers[requested] and providers[requested].hasData and requested or nil
+    end
+    if providers.openai and providers.openai.hasData then return "openai" end
+    if type(snapshot.primary) == "string" and providers[snapshot.primary] and providers[snapshot.primary].hasData then return snapshot.primary end
+    return M.ids(snapshot)[1]
 end
 
 function M.glyph(entry)
     if entry and entry.brand == "openai" then return "brand-openai" end
+    if entry and entry.brand == "opencode-go" then return "code" end
     return "brain"
 end
 
-function M.barRows(entry)
+function M.barRows(entry, prefs, id)
     local rows = {}
-    for _, section in ipairs(entry and entry.sections or {}) do
+    for _, section in ipairs(M.sections(entry, prefs, id)) do
         if section.type == "metric" or section.type == "text" then rows[#rows + 1] = section
         elseif section.type == "block" and #rows == 0 then
             rows[1] = { type = "text", label = section.label, value = section.body[1] }

@@ -1,6 +1,6 @@
 id = "pupu/ai-usage-lite"
 name = "AI Usage Lite"
-version = "0.4.0"
+version = "0.4.1"
 plugin_api = 32
 author = "pupu"
 license = "MIT"
@@ -33,6 +33,13 @@ entry = "service.luau"
 [[widget]]
 id = "bar"
 entry = "bar.luau"
+
+[[widget.setting]]
+key = "account_id"
+type = "string"
+label_key = "settings.account.label"
+description_key = "settings.account.description"
+default = "openai"
 
 [[widget.setting]]
 key = "show_countdown"

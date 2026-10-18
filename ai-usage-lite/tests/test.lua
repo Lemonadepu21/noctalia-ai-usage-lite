@@ -65,7 +65,7 @@ local balanceOnly = { id = "custom:wallet", display_name = "My API", status = "r
 local many = { schema_version = 1, primary = "openrouter@work", entries = { copy(report.entries[1]), money, balanceOnly,
     { id = "new-vendor", display_name = "New subscription", status = "error" } } }
 local general = model.merge(nil, many, clock)
-assert(#model.ids(general) == 4 and general.providers["openrouter@work"].metrics[1].headline == "value")
+assert(#model.ids(general) == 3 and general.providers["openrouter@work"].metrics[1].headline == "value")
 assert(general.providers["openrouter@work"].metrics[1].value == "$17.60")
 local longName = copy(money); longName.display_name = string.rep("中", 100)
 assert(utf8.len(model.entry(longName, clock).name) == 33, "label truncation split a UTF-8 character")
@@ -83,12 +83,25 @@ local removed = model.merge(general, { schema_version = 1, entries = { balanceOn
 assert(#model.ids(removed) == 1 and not removed.providers["openai"], "removed accounts stayed in the selector")
 local invalidId = copy(balanceOnly); invalidId.id = "bad\nid"
 assert(#model.ids(model.merge(nil, { schema_version = 1, entries = { invalidId, invalidId } }, clock)) == 0)
+local codexWithCredits = copy(report.entries[1])
+local codexMetric = copy(rolling); codexMetric.type = "metric"
+codexWithCredits.sections = { codexMetric, { type = "block", label = "Credits", body = { "balance: $0.00" } } }
+local codexView = model.merge(nil, { schema_version = 1, entries = { codexWithCredits } }, clock)
+assert(#model.sections(codexView.providers.openai) == 1, "Codex supplementary credits appeared by default")
+local creditsKey = codexView.providers.openai.sections[2].key
+codexView.preferences = { sections = { openai = { [creditsKey] = true } } }
+assert(#model.sections(codexView.providers.openai, codexView.preferences, "openai") == 2)
+assert(#model.tabIds({ providers = general.providers, preferences = { tabs = { "openai" } } }) == 1)
+assert(#model.tabIds({ providers = general.providers, preferences = { tabs = {} } }) == 0)
+local deepseek = copy(money); deepseek.id = "deepseek"; deepseek.display_name = "DeepSeek"
+deepseek.sections[1].value = "CNY 0.00"
+assert(model.entry(deepseek, clock).hasData, "a real zero API balance was hidden")
 
 
 local function harness(cache)
     local state, watches, calls, writes = {}, {}, {}, {}
     local env = setmetatable({}, { __index = _G })
-    env.config = { refresh_minutes = 5, timeout_seconds = 30, progress_width = 40, show_countdown = true }
+    env.config = { refresh_minutes = 5, timeout_seconds = 30, progress_width = 40, show_countdown = true, account_id = "openai" }
     local doc = { valid = report, partial = partial, cached = cache }
     local enabled = true
     env.noctalia = {
@@ -116,6 +129,7 @@ local function harness(cache)
         log = function() end,
         formatTime = function(_, at) return tostring(at) end,
         togglePanel = function(id) env.toggled = id end,
+        copyToClipboard = function(value) env.clipboard = value end,
     }
     env.require = function(path)
         return assert(loadfile(source .. path, "t", env))()
@@ -128,7 +142,8 @@ local function harness(cache)
         close = function() env.closed = true end }
     env.barRenders = 0
     env.barWidget = { render = function(tree) env.barTree = tree; env.barRenders = env.barRenders + 1 end,
-        isVertical = function() return false end, setTooltip = function(value) env.tip = value end }
+        isVertical = function() return false end, setTooltip = function(value) env.tip = value end,
+        setVisible = function(value) env.visible = value end }
     function env.load(name) assert(loadfile(source .. name .. ".luau", "t", env))() end
     function env.complete(result, index) calls[index or #calls].callback(result) end
     function env.refuse() enabled = false end
@@ -173,14 +188,13 @@ clock = clock + 6; service.refuse(); service.onIpc("refresh")
 assert(not service.state.snapshot.busy and service.state.snapshot.error:find("启动"))
 local restart = harness({ version = 1, providers = merged.providers }); restart.load("service")
 assert(restart.state.snapshot.providers.openai.stale)
-local callsBeforePin = #service.calls
-service.noctalia.state.set("bar_provider", "opencode-go")
-assert(service.state.snapshot.barProvider == "opencode-go" and service.encoded.barProvider == "opencode-go")
-assert(#service.calls == callsBeforePin, "pinning an account triggered a CLI query")
-local preferred = harness({ version = 2, providers = general.providers, order = general.order, barProvider = "openrouter@work" })
+local callsBeforePreference = #service.calls
+service.noctalia.state.set("display_preferences", { tabs = { "openai" }, sections = { openai = { ["block:Credits:1"] = false } } })
+assert(service.state.snapshot.preferences.tabs[1] == "openai" and service.encoded.preferences.tabs[1] == "openai")
+assert(#service.calls == callsBeforePreference, "display preferences triggered a CLI query")
+local preferred = harness({ version = 2, providers = general.providers, order = general.order, preferences = { tabs = { "openrouter@work" } } })
 preferred.load("service")
-assert(preferred.state.snapshot.barProvider == "openrouter@work")
-
+assert(preferred.state.snapshot.preferences.tabs[1] == "openrouter@work")
 
 local configured = harness()
 configured.config.refresh_minutes, configured.config.timeout_seconds = 2, 55
@@ -239,19 +253,40 @@ assert(find(find(slowPanel.tree, "status"), "icon").props.name == "circle-check"
 local dynamic = harness()
 dynamic.noctalia.state.set("snapshot", general); dynamic.noctalia.state.set("heartbeat", clock)
 dynamic.load("panel"); dynamic.onOpen()
-assert(#find(dynamic.tree, "provider").props.options == 4)
-dynamic.selectProvider("1")
+assert(find(dynamic.tree, "openai") and find(dynamic.tree, "openrouter@work") and find(dynamic.tree, "custom:wallet"))
+assert(not find(dynamic.tree, "new-vendor") and not find(dynamic.tree, "provider"), "failed/unconfigured account or dropdown was shown")
+local openRouterTab = find(dynamic.tree, "openrouter@work").props.onClick
+openRouterTab()
 assert(find(dynamic.tree, "percent").props.text == "$17.60")
 assert(not find(dynamic.tree, "progress"), "balance was rendered as a made-up remaining quota")
-dynamic.pinProvider(); assert(dynamic.state.bar_provider == "openrouter@work")
-dynamic.selectProvider("2"); assert(find(dynamic.tree, "line-1").props.text == "CNY -1.25")
-dynamic.selectProvider("999"); dynamic.selectProvider("-1"); dynamic.selectProvider("1.5")
+find(dynamic.tree, "custom:wallet").props.onClick()
+assert(find(dynamic.tree, "line-1").props.text == "CNY -1.25")
+dynamic.toggleSettings()
+find(find(dynamic.tree, "account-openrouter@work"), "enabled").props.onChange("false")
+assert(#dynamic.state.display_preferences.tabs == 2)
+find(find(dynamic.tree, "account-openrouter@work"), "copy").props.onClick()
+assert(dynamic.clipboard == "openrouter@work")
+dynamic.toggleSettings()
+assert(not find(dynamic.tree, "openrouter@work") and find(dynamic.tree, "openai") and find(dynamic.tree, "custom:wallet"))
+dynamic.toggleSettings()
+find(find(dynamic.tree, "account-openrouter@work"), "enabled").props.onChange("true")
+dynamic.toggleSettings()
+assert(find(dynamic.tree, "openrouter@work").props.onClick == openRouterTab, "tab handler changed across renders")
 assert(dynamic.state.refresh == nil and #dynamic.calls == 0)
+local creditsPanel = harness()
+codexView.preferences = nil
+creditsPanel.noctalia.state.set("snapshot", codexView); creditsPanel.noctalia.state.set("heartbeat", clock)
+creditsPanel.load("panel"); creditsPanel.onOpen()
+assert(not find(creditsPanel.tree, "line-1"))
+creditsPanel.toggleSettings()
+find(find(creditsPanel.tree, "show-" .. creditsKey), "enabled").props.onChange("true")
+creditsPanel.toggleSettings()
+assert(find(creditsPanel.tree, "line-1").props.text == "balance: $0.00")
 local function checkTree(node, keys)
     assert(type(node.props.key) == "string", "unkeyed node")
     assert(not keys[node.props.key], "duplicate sibling key"); keys[node.props.key] = true
-    if node.props.onClick then assert(type(node.props.onClick) == "string" and type(panel[node.props.onClick]) == "function") end
-    if node.props.onChange then assert(type(node.props.onChange) == "string" and type(panel[node.props.onChange]) == "function") end
+    if node.props.onClick then assert(type(node.props.onClick) == "function" or (type(node.props.onClick) == "string" and type(panel[node.props.onClick]) == "function")) end
+    if node.props.onChange then assert(type(node.props.onChange) == "function" or (type(node.props.onChange) == "string" and type(panel[node.props.onChange]) == "function")) end
     if node.props.fontWeight then
         assert(({thin=true, light=true, normal=true, medium=true, semibold=true, bold=true, heavy=true})[node.props.fontWeight], "unsupported font weight")
     end
@@ -299,14 +334,15 @@ renders = bar.barRenders
 clock = clock + 60; bar.noctalia.state.set("heartbeat", clock); bar.update()
 assert(bar.barRenders == renders, "hidden countdown still redrew the bar")
 local walletBar = harness()
-general.barProvider = "openrouter@work"
+walletBar.config.account_id = "openrouter@work"
 walletBar.noctalia.state.set("snapshot", general); walletBar.noctalia.state.set("heartbeat", clock)
 walletBar.load("bar")
 assert(find(walletBar.barTree, "value").props.text == "$17.60" and not find(walletBar.barTree, "progress"))
 assert(walletBar.tip:find("OpenRouter"))
-general.barProvider = "new-vendor"
+assert(bar.config.account_id == "openai" and bar.barTree.children[1].props.name == "brand-openai", "one widget changed another widget's account")
+walletBar.config.account_id = "new-vendor"
 walletBar.noctalia.state.set("snapshot", general)
-assert(find(walletBar.barTree, "empty") and not find(walletBar.barTree, "progress"), "failed-only pinned account crashed or invented usage")
+assert(not walletBar.visible, "failed-only widget account was shown")
 local emptyPanel = harness(); emptyPanel.load("panel"); emptyPanel.onOpen()
-assert(find(emptyPanel.tree, "empty") and not find(emptyPanel.tree, "provider").props.enabled)
-print("PASS: generic providers/accounts, currency/value/text/block sections, dynamic selector, pinned bar/cache, partial errors, dates, schema, legacy cache migration, configurable scheduling, concurrency/watchdog/resume, 400 switches, stable callbacks, no timer panel renders")
+assert(find(emptyPanel.tree, "empty") and #find(emptyPanel.tree, "tabs").children == 0)
+print("PASS: generic providers/accounts, currency/value/text/block sections, visible-data tabs, independent widget accounts, display preferences/cache, partial errors, dates, schema, legacy cache migration, configurable scheduling, concurrency/watchdog/resume, 400 switches, stable callbacks, no timer panel renders")

@@ -13,7 +13,7 @@ local function save()
     local providers = {}
     for id, entry in pairs(snapshot.providers) do if entry.hasData then providers[id] = entry end end
     local encoded = noctalia.json.encode({ version = 2, providers = providers, order = snapshot.order,
-        primary = snapshot.primary, barProvider = snapshot.barProvider })
+        primary = snapshot.primary, preferences = snapshot.preferences })
     if not cachePath or not encoded or #encoded > 2097152 then snapshot.cacheError = "成功数据缓存不可写或过大"; return end
     local ok = noctalia.writeFile(cachePath .. ".tmp", encoded)
     if ok then ok = noctalia.renameFile(cachePath .. ".tmp", cachePath) end
@@ -87,9 +87,8 @@ function onIpc(event)
 end
 
 noctalia.state.watch("refresh", function() refresh() end)
-noctalia.state.watch("bar_provider", function(id)
-    if type(id) ~= "string" or not snapshot.providers[id] or id == snapshot.barProvider then return end
-    snapshot.barProvider = id
+noctalia.state.watch("display_preferences", function(value)
+    snapshot.preferences = model.preferences(value)
     save()
     publish()
 end)
@@ -102,7 +101,7 @@ if cachePath then
             snapshot.providers = model.restore(cached)
             snapshot.order = type(cached.order) == "table" and cached.order or nil
             snapshot.primary = type(cached.primary) == "string" and cached.primary or nil
-            snapshot.barProvider = type(cached.barProvider) == "string" and cached.barProvider or nil
+            snapshot.preferences = model.preferences(cached.preferences)
         end
     end
 end

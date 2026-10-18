@@ -4,7 +4,7 @@ local previousView, previousTip
 
 function update()
     local time = noctalia.nowMs() / 1000
-    local id = model.barId(snapshot)
+    local id = model.barId(snapshot, noctalia.getConfig("account_id"))
     local entry = id and snapshot.providers[id]
     local errorText = model.health(snapshot, noctalia.state.get("heartbeat"), time)
         or (snapshot.errors and snapshot.errors[id])
@@ -14,7 +14,7 @@ function update()
     local signature = { id or "none", entry and "data" or tostring(snapshot.busy), tostring(width), tostring(countdown) }
     local rows, tips = {}, { (entry and entry.name or "AI 用量") .. "\n点击查看详情 · 右键刷新" }
     if entry then
-        for i, metric in ipairs(model.barRows(entry)) do
+        for i, metric in ipairs(model.barRows(entry, snapshot.preferences, id)) do
             local percent = metric.type == "metric" and metric.headline ~= "value"
             local remaining = percent and math.max(0, 100 - metric.percent) or nil
             local role = percent and remaining <= 10 and "error" or i == 1 and "primary" or "secondary"
@@ -46,6 +46,7 @@ function update()
     end
     if errorText then tips[#tips + 1] = errorText end
     if stale then tips[#tips + 1] = "显示上次成功数据" end
+    barWidget.setVisible(entry ~= nil and #model.barRows(entry, snapshot.preferences, id) > 0)
     local view = table.concat(signature, "|")
     if view ~= previousView then
         local children = {
@@ -61,7 +62,10 @@ function update()
     if tip ~= previousTip then barWidget.setTooltip(tip); previousTip = tip end
 end
 
-function onClick() noctalia.togglePanel("pupu/ai-usage-lite:panel") end
+function onClick()
+    noctalia.state.set("panel_account", model.barId(snapshot, noctalia.getConfig("account_id")))
+    noctalia.togglePanel("pupu/ai-usage-lite:panel")
+end
 function onRightClick() model.request() end
 noctalia.state.watch("snapshot", function(value) snapshot = value or {}; update() end)
 noctalia.setUpdateInterval(60000)

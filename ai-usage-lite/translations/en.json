@@ -6,5 +6,7 @@
   "settings.countdown.label": "Show reset countdown",
   "settings.countdown.description": "Show time until reset beside each quota. Local reset times remain in the popup.",
   "settings.width.label": "Progress bar width",
-  "settings.width.description": "Width of each quota progress bar, from 24 to 100 logical pixels."
+  "settings.width.description": "Width of each quota progress bar, from 24 to 100 logical pixels.",
+  "settings.account.label": "Account ID",
+  "settings.account.description": "One account per widget. Copy its ID from the popup display settings; add another widget for another account."
 }

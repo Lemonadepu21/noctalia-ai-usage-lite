@@ -6,5 +6,7 @@
   "settings.countdown.label": "显示重置倒计时",
   "settings.countdown.description": "在状态栏额度旁显示距重置的时间；展开页仍保留本地重置时刻。",
   "settings.width.label": "进度条宽度",
-  "settings.width.description": "每条额度进度条的宽度，范围 24–100 逻辑像素。"
+  "settings.width.description": "每条额度进度条的宽度，范围 24–100 逻辑像素。",
+  "settings.account.label": "展示账户 ID",
+  "settings.account.description": "每个组件只显示一个账户。在展开页的显示设置中复制账户 ID；显示多个账户时添加多个组件。"
 }
