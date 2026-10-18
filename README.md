@@ -15,6 +15,14 @@ Noctalia v5 的轻量 AI 用量插件，显示 **订阅剩余额度、重置时�
 
 需要 **Noctalia v5.2.1+（插件 API 32）**、Git，以及已完成账户配置的 **ai-usagebar CLI**。CLI 的安装和登录见[上游说明](https://github.com/akitaonrails/ai-usagebar#readme)。
 
+**还没添加账户？** 先按 [CLI 添加订阅和 API 账户指南](docs/ACCOUNTS.md) 配置。指南包含 Codex、Claude、OpenCode Go、DeepSeek，以及同一服务的多个账户。
+
+已有 Codex 订阅登录时，只需启用对应提供商：
+
+```sh
+ai-usagebar settings enable openai
+```
+
 先确认至少一个账户能返回成功数据：
 
 ```sh
@@ -115,4 +123,4 @@ noctalia msg plugin pupu/ai-usage-lite:poller all refresh
 
 已在本机验证真实 CLI 查询、Tab 切换和显示开关；API 余额与多账户使用虚构数据做隔离测试，不能视为所有供应商真实查询均已通过。
 
-[技术说明与测试方法](docs/DEVELOPMENT.md) · [MIT 许可](LICENSE)
+[CLI 账户配置](docs/ACCOUNTS.md) · [技术说明与测试方法](docs/DEVELOPMENT.md) · [MIT 许可](LICENSE)
