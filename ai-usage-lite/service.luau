@@ -10,8 +10,11 @@ local function now() return noctalia.nowMs() / 1000 end
 local function publish() noctalia.state.set("snapshot", snapshot) end
 
 local function save()
-    local encoded = noctalia.json.encode({ version = 1, providers = snapshot.providers })
-    if not cachePath or not encoded then snapshot.cacheError = "成功数据缓存不可写"; return end
+    local providers = {}
+    for id, entry in pairs(snapshot.providers) do if entry.hasData then providers[id] = entry end end
+    local encoded = noctalia.json.encode({ version = 2, providers = providers, order = snapshot.order,
+        primary = snapshot.primary, barProvider = snapshot.barProvider })
+    if not cachePath or not encoded or #encoded > 2097152 then snapshot.cacheError = "成功数据缓存不可写或过大"; return end
     local ok = noctalia.writeFile(cachePath .. ".tmp", encoded)
     if ok then ok = noctalia.renameFile(cachePath .. ".tmp", cachePath) end
     snapshot.cacheError = not ok and "成功数据缓存不可写" or nil
@@ -50,6 +53,7 @@ local function refresh()
         local merged = model.merge(snapshot, decoded, now())
         if not merged then finish("CLI JSON 无效或版本不兼容"); return end
         snapshot.providers, snapshot.errors, snapshot.checked = merged.providers, merged.errors, merged.checked
+        snapshot.order, snapshot.primary = merged.order, merged.primary
         save()
         finish(nil)
     end, (timeoutSeconds + 5) * 1000)
@@ -83,11 +87,23 @@ function onIpc(event)
 end
 
 noctalia.state.watch("refresh", function() refresh() end)
+noctalia.state.watch("bar_provider", function(id)
+    if type(id) ~= "string" or not snapshot.providers[id] or id == snapshot.barProvider then return end
+    snapshot.barProvider = id
+    save()
+    publish()
+end)
 if cachePath then
     local info = noctalia.fileInfo(cachePath)
-    if info and info.size <= 65536 then
+    if info and info.size <= 2097152 then
         local raw = noctalia.readFile(cachePath)
-        if raw then snapshot.providers = model.restore(noctalia.json.decode(raw)) end
+        local cached = raw and noctalia.json.decode(raw)
+        if type(cached) == "table" then
+            snapshot.providers = model.restore(cached)
+            snapshot.order = type(cached.order) == "table" and cached.order or nil
+            snapshot.primary = type(cached.primary) == "string" and cached.primary or nil
+            snapshot.barProvider = type(cached.barProvider) == "string" and cached.barProvider or nil
+        end
     end
 end
 publish()

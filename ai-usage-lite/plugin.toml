@@ -1,11 +1,11 @@
 id = "pupu/ai-usage-lite"
 name = "AI Usage Lite"
-version = "0.3.0"
+version = "0.4.0"
 plugin_api = 32
 author = "pupu"
 license = "MIT"
 icon = "brain"
-description = "Codex 与 OpenCode Go 用量；由已安装的 ai-usagebar CLI 查询。"
+description = "通用 AI 订阅额度与 API 余额；由已安装的 ai-usagebar CLI 查询。"
 dependencies = ["ai-usagebar", "flock", "timeout"]
 
 [[setting]]

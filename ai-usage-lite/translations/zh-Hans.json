@@ -1,6 +1,6 @@
 {
   "settings.refresh.label": "同步间隔（分钟）",
-  "settings.refresh.description": "每 1–120 分钟查询两个订阅；仍可随时手动刷新。",
+  "settings.refresh.description": "每 1–120 分钟查询已配置的订阅和 API 账户；仍可随时手动刷新。",
   "settings.timeout.label": "查询超时（秒）",
   "settings.timeout.description": "每次 CLI 查询允许 5–55 秒，修改后从下一次查询生效。",
   "settings.countdown.label": "显示重置倒计时",

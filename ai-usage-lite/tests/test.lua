@@ -17,7 +17,7 @@ assert(model.duration(clock + 1, clock) == "1分")
 assert(model.duration(clock, clock):find("待查询"))
 assert(model.duration(nil, clock) == "重置时间未知")
 local function raw(id, metrics)
-    return { id = id, status = "ready", plan = "Plan", fetched_at = "2026-10-16T10:58:21Z", metrics = metrics }
+    return { id = id, display_name = id == "openai" and "Codex" or id == "opencode-go" and "OpenCode Go" or id, status = "ready", plan = "Plan", fetched_at = "2026-10-16T10:58:21Z", metrics = metrics }
 end
 local rolling = { label = "Rolling (5h)", percent = 46, reset_at = "2026-10-16T11:58:43Z", window_secs = 18000 }
 local weekly = { label = "Weekly", percent = 27, reset_at = "2026-10-22T06:15:12Z", window_secs = 604800 }
@@ -54,8 +54,36 @@ assert(restored.openai.manualResets == 1)
 assert(restored.openai.manualExpiries[1] == model.epoch(expiry))
 local invalidCache = copy(merged.providers); invalidCache.openai.manualExpiries = { "bad", math.huge }
 assert(not model.restore({ version = 1, providers = invalidCache }).openai.manualExpiries)
-assert(next(model.restore({ version = 2, providers = merged.providers })) == nil)
+assert(next(model.restore({ version = 3, providers = merged.providers })) == nil)
 assert(model.health({}, clock - 61, clock):find("无响应"))
+local money = { id = "openrouter@work", display_name = "OpenRouter · work", brand = "openrouter", status = "ready",
+    sections = { { type = "metric", label = "Balance", percent = 12, headline = "value", value = "$17.60", detail = "Credits left" },
+        { type = "text", label = "Spent", value = "$2.40" },
+        { type = "block", label = "Details", body = { "Daily: $0.10", "Monthly: $2.40" } } } }
+local balanceOnly = { id = "custom:wallet", display_name = "My API", status = "ready",
+    metrics = {}, sections = { { type = "block", label = "Balance", body = { "CNY -1.25" } } } }
+local many = { schema_version = 1, primary = "openrouter@work", entries = { copy(report.entries[1]), money, balanceOnly,
+    { id = "new-vendor", display_name = "New subscription", status = "error" } } }
+local general = model.merge(nil, many, clock)
+assert(#model.ids(general) == 4 and general.providers["openrouter@work"].metrics[1].headline == "value")
+assert(general.providers["openrouter@work"].metrics[1].value == "$17.60")
+local longName = copy(money); longName.display_name = string.rep("中", 100)
+assert(utf8.len(model.entry(longName, clock).name) == 33, "label truncation split a UTF-8 character")
+assert(general.providers["custom:wallet"].hasData and model.barRows(general.providers["custom:wallet"])[1].value == "CNY -1.25")
+assert(general.errors["new-vendor"] and not general.providers["new-vendor"].hasData)
+local namedCodex = copy(report.entries[1]); namedCodex.id = "openai@personal"; namedCodex.brand = "openai"
+assert(model.entry(namedCodex, clock).manualResets == 1 and model.glyph(model.entry(namedCodex, clock)) == "brand-openai")
+local generalCache = model.restore({ version = 2, providers = general.providers })
+assert(generalCache["openrouter@work"].sections[2].value == "$2.40" and generalCache["custom:wallet"])
+assert(not generalCache["new-vendor"], "failed-only metadata was treated as successful cache")
+local failedGeneral = copy(many); failedGeneral.entries[2].status = "error"
+local preserved = model.merge(general, failedGeneral, clock)
+assert(preserved.providers["openrouter@work"].metrics[1].value == "$17.60" and preserved.errors["openrouter@work"])
+local removed = model.merge(general, { schema_version = 1, entries = { balanceOnly } }, clock)
+assert(#model.ids(removed) == 1 and not removed.providers["openai"], "removed accounts stayed in the selector")
+local invalidId = copy(balanceOnly); invalidId.id = "bad\nid"
+assert(#model.ids(model.merge(nil, { schema_version = 1, entries = { invalidId, invalidId } }, clock)) == 0)
+
 
 local function harness(cache)
     local state, watches, calls, writes = {}, {}, {}, {}
@@ -145,6 +173,14 @@ clock = clock + 6; service.refuse(); service.onIpc("refresh")
 assert(not service.state.snapshot.busy and service.state.snapshot.error:find("启动"))
 local restart = harness({ version = 1, providers = merged.providers }); restart.load("service")
 assert(restart.state.snapshot.providers.openai.stale)
+local callsBeforePin = #service.calls
+service.noctalia.state.set("bar_provider", "opencode-go")
+assert(service.state.snapshot.barProvider == "opencode-go" and service.encoded.barProvider == "opencode-go")
+assert(#service.calls == callsBeforePin, "pinning an account triggered a CLI query")
+local preferred = harness({ version = 2, providers = general.providers, order = general.order, barProvider = "openrouter@work" })
+preferred.load("service")
+assert(preferred.state.snapshot.barProvider == "openrouter@work")
+
 
 local configured = harness()
 configured.config.refresh_minutes, configured.config.timeout_seconds = 2, 55
@@ -200,18 +236,30 @@ local older = copy(merged); older.providers.openai.fetched = clock - 3600
 slowPanel.noctalia.state.set("snapshot", older); slowPanel.noctalia.state.set("heartbeat", clock)
 slowPanel.load("panel"); slowPanel.onOpen()
 assert(find(find(slowPanel.tree, "status"), "icon").props.name == "circle-check", "long refresh interval marked data stale too soon")
+local dynamic = harness()
+dynamic.noctalia.state.set("snapshot", general); dynamic.noctalia.state.set("heartbeat", clock)
+dynamic.load("panel"); dynamic.onOpen()
+assert(#find(dynamic.tree, "provider").props.options == 4)
+dynamic.selectProvider("1")
+assert(find(dynamic.tree, "percent").props.text == "$17.60")
+assert(not find(dynamic.tree, "progress"), "balance was rendered as a made-up remaining quota")
+dynamic.pinProvider(); assert(dynamic.state.bar_provider == "openrouter@work")
+dynamic.selectProvider("2"); assert(find(dynamic.tree, "line-1").props.text == "CNY -1.25")
+dynamic.selectProvider("999"); dynamic.selectProvider("-1"); dynamic.selectProvider("1.5")
+assert(dynamic.state.refresh == nil and #dynamic.calls == 0)
 local function checkTree(node, keys)
     assert(type(node.props.key) == "string", "unkeyed node")
     assert(not keys[node.props.key], "duplicate sibling key"); keys[node.props.key] = true
     if node.props.onClick then assert(type(node.props.onClick) == "string" and type(panel[node.props.onClick]) == "function") end
+    if node.props.onChange then assert(type(node.props.onChange) == "string" and type(panel[node.props.onChange]) == "function") end
     if node.props.fontWeight then
         assert(({thin=true, light=true, normal=true, medium=true, semibold=true, bold=true, heavy=true})[node.props.fontWeight], "unsupported font weight")
     end
     local childKeys = {}; for _, child in ipairs(node.children) do checkTree(child, childKeys) end
 end
 for _ = 1, 200 do
-    panel.selectGo(); checkTree(panel.tree, {}); assert(not find(panel.tree, "manual-resets"))
-    panel.selectCodex(); checkTree(panel.tree, {})
+    panel.onIpc("select", "opencode-go"); checkTree(panel.tree, {}); assert(not find(panel.tree, "manual-resets"))
+    panel.onIpc("select", "openai"); checkTree(panel.tree, {})
 end
 assert(#panel.calls == 0 and panel.state.refresh == nil, "selection triggered a query")
 local count = panel.renders
@@ -237,6 +285,7 @@ checkTree(bar.barTree, {})
 local expired = copy(merged)
 expired.error = "cached"
 expired.providers.openai.metrics[1].reset = clock - 1
+expired.providers.openai.sections[1].reset = clock - 1
 bar.noctalia.state.set("snapshot", expired)
 assert(#bar.barTree.children == 2 and not find(bar.barTree, "stale"))
 assert(bar.barTree.children[2].children[1].children[3].props.text == "0m")
@@ -249,4 +298,15 @@ assert(bar.barTree.children[2].children[1].children[1].props.width == 72)
 renders = bar.barRenders
 clock = clock + 60; bar.noctalia.state.set("heartbeat", clock); bar.update()
 assert(bar.barRenders == renders, "hidden countdown still redrew the bar")
-print("PASS: dates, schema, cache, configurable interval and timeout, in-flight settings, single flight, watchdog, resume, 400 switches, stable callbacks, no timer panel renders, configurable compact bar, manual reset counts")
+local walletBar = harness()
+general.barProvider = "openrouter@work"
+walletBar.noctalia.state.set("snapshot", general); walletBar.noctalia.state.set("heartbeat", clock)
+walletBar.load("bar")
+assert(find(walletBar.barTree, "value").props.text == "$17.60" and not find(walletBar.barTree, "progress"))
+assert(walletBar.tip:find("OpenRouter"))
+general.barProvider = "new-vendor"
+walletBar.noctalia.state.set("snapshot", general)
+assert(find(walletBar.barTree, "empty") and not find(walletBar.barTree, "progress"), "failed-only pinned account crashed or invented usage")
+local emptyPanel = harness(); emptyPanel.load("panel"); emptyPanel.onOpen()
+assert(find(emptyPanel.tree, "empty") and not find(emptyPanel.tree, "provider").props.enabled)
+print("PASS: generic providers/accounts, currency/value/text/block sections, dynamic selector, pinned bar/cache, partial errors, dates, schema, legacy cache migration, configurable scheduling, concurrency/watchdog/resume, 400 switches, stable callbacks, no timer panel renders")

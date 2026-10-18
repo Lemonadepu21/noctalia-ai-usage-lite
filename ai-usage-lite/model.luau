@@ -1,6 +1,4 @@
 local M = {}
-M.ids = { "openai", "opencode-go" }
-M.names = { openai = "Codex", ["opencode-go"] = "OpenCode Go" }
 
 local function finite(n)
     return type(n) == "number" and n == n and math.abs(n) < math.huge
@@ -54,86 +52,165 @@ end
 
 local function text(value, fallback)
     if type(value) ~= "string" then return fallback end
-    return value:gsub("[%c]", " "):sub(1, 100)
+    value = value:gsub("[%c]", " ")
+    local cut = math.min(#value, 100)
+    while cut > 0 and value:byte(cut + 1) and value:byte(cut + 1) >= 128 and value:byte(cut + 1) < 192 do cut = cut - 1 end
+    return value:sub(1, cut)
 end
 
-function M.entry(raw, now)
-    if type(raw) ~= "table" or raw.status ~= "ready" or type(raw.metrics) ~= "table" then return nil end
-    local metrics = {}
-    for i, metric in ipairs(raw.metrics) do
-        if i > 8 then break end
-        if type(metric) == "table" and finite(metric.percent) and metric.percent >= 0 then
-            metrics[#metrics + 1] = {
-                label = text(metric.label, "额度"), percent = metric.percent,
-                reset = M.epoch(metric.reset_at), window = finite(metric.window_secs) and metric.window_secs or nil,
-            }
+local function validId(id)
+    return type(id) == "string" and #id > 0 and #id <= 160 and not id:find("[%c]")
+end
+
+local function metadata(raw)
+    local name = text(raw.display_name or raw.name, raw.id)
+    return { name = name ~= "" and name or raw.id,
+        brand = text(raw.brand, raw.id:match("^([^@]+)")), plan = text(raw.plan, "") }
+end
+
+local function metric(raw, cached)
+    if type(raw) ~= "table" or not finite(raw.percent) or raw.percent < 0 then return nil end
+    if raw.headline == "value" and (type(raw.value) ~= "string" or raw.value == "") then return nil end
+    return { type = "metric", label = text(raw.label, "额度"), percent = raw.percent,
+        headline = raw.headline == "value" and "value" or "percent", value = text(raw.value, ""),
+        detail = text(raw.detail, ""),
+        reset = cached and (finite(raw.reset) and raw.reset or nil) or M.epoch(raw.reset_at),
+        window = cached and (finite(raw.window) and raw.window or nil)
+            or (finite(raw.window_secs) and raw.window_secs or nil) }
+end
+
+function M.entry(raw, now, cached)
+    if type(raw) ~= "table" or not validId(raw.id) or raw.status ~= "ready" then return nil end
+    local entry = metadata(raw)
+    entry.metrics, entry.sections = {}, {}
+    for i, section in ipairs(type(raw.sections) == "table" and raw.sections or {}) do
+        if i > 64 then break end
+        if type(section) == "table" then
+            local normalized
+            if section.type == "metric" then
+                normalized = metric(section, cached)
+                if normalized then entry.metrics[#entry.metrics + 1] = normalized end
+            elseif section.type == "text" and type(section.value) == "string" then
+                normalized = { type = "text", label = text(section.label, ""), value = text(section.value, "") }
+            elseif section.type == "block" and type(section.body) == "table" then
+                local body = {}
+                for j, line in ipairs(section.body) do
+                    if j > 16 then break end
+                    if type(line) == "string" then body[#body + 1] = text(line, "") end
+                end
+                if #body > 0 then normalized = { type = "block", label = text(section.label, ""), body = body } end
+            end
+            if normalized then entry.sections[#entry.sections + 1] = normalized end
         end
     end
-    if #metrics == 0 then return nil end
-    local expiries, seen = {}, {}
-    local credits = raw.id == "openai" and type(raw.reset_credits) == "table" and raw.reset_credits.credits
-    if type(credits) == "table" then
-        for i, credit in ipairs(credits) do
+    -- sections preserves balance and text rows that the metrics convenience view omits.
+    if #entry.sections == 0 then
+        for i, item in ipairs(type(raw.metrics) == "table" and raw.metrics or {}) do
             if i > 32 then break end
-            local expiry = type(credit) == "table" and M.epoch(credit.expires_at)
-            if expiry and not seen[expiry] then expiries[#expiries + 1] = expiry; seen[expiry] = true end
+            local normalized = metric(item, cached)
+            if normalized then
+                entry.metrics[#entry.metrics + 1] = normalized
+                entry.sections[#entry.sections + 1] = normalized
+            end
         end
-        table.sort(expiries)
     end
-    return { metrics = metrics, fetched = M.epoch(raw.fetched_at) or now,
-        manualResets = raw.id == "openai" and type(raw.reset_credits) == "table" and count(raw.reset_credits.available) or nil,
-        manualExpiries = #expiries > 0 and expiries or nil,
-        plan = text(raw.plan, ""), stale = raw.stale == true or (type(raw.error) == "string" and raw.error ~= "") }
+    if #entry.sections == 0 then return nil end
+    local inventory = type(raw.reset_credits) == "table" and raw.reset_credits or {}
+    local expiries, seen = {}, {}
+    local credits = cached and raw.manualExpiries or inventory.credits
+    for i, credit in ipairs(type(credits) == "table" and credits or {}) do
+        if i > 32 then break end
+        local expiry = cached and (finite(credit) and credit >= 0 and credit or nil)
+            or (type(credit) == "table" and M.epoch(credit.expires_at))
+        if expiry and not seen[expiry] then expiries[#expiries + 1] = expiry; seen[expiry] = true end
+    end
+    table.sort(expiries)
+    entry.manualResets = count(cached and raw.manualResets or inventory.available)
+    entry.manualExpiries = #expiries > 0 and expiries or nil
+    entry.fetched = cached and raw.fetched or M.epoch(raw.fetched_at) or now
+    entry.hasData = true
+    entry.stale = cached or raw.stale == true or (type(raw.error) == "string" and raw.error ~= "")
+    return entry
 end
 
 function M.merge(previous, report, now)
     if type(report) ~= "table" or report.schema_version ~= 1 or type(report.entries) ~= "table" then return nil end
-    local result = { providers = {}, errors = {}, checked = now }
-    for _, id in ipairs(M.ids) do
-        local found
-        for _, raw in ipairs(report.entries) do
-            if type(raw) == "table" and raw.id == id then found = raw; break end
-        end
-        local entry = M.entry(found, now)
-        if entry then
+    local result = { providers = {}, order = {}, errors = {}, checked = now,
+        primary = validId(report.primary) and report.primary or nil,
+        barProvider = previous and previous.barProvider }
+    for i, raw in ipairs(report.entries) do
+        if i > 128 then break end
+        if type(raw) == "table" and validId(raw.id) and not result.providers[raw.id] then
+            local id = raw.id
+            local entry = M.entry(raw, now)
+            if entry then
+                if entry.stale then result.errors[id] = "CLI 返回缓存数据" end
+            else
+                entry = previous and previous.providers and previous.providers[id] or metadata(raw)
+                entry.metrics, entry.sections = entry.metrics or {}, entry.sections or {}
+                result.errors[id] = "此账户未返回可用数据，请检查 CLI 配置或认证"
+            end
             result.providers[id] = entry
-            if entry.stale then result.errors[id] = "CLI 返回缓存数据" end
-        else
-            result.providers[id] = previous and previous.providers and previous.providers[id] or nil
-            result.errors[id] = found and "订阅查询失败，请检查 CLI" or "CLI 未返回此订阅"
+            result.order[#result.order + 1] = id
         end
     end
     return result
 end
 
 function M.restore(value)
-    if type(value) ~= "table" or value.version ~= 1 or type(value.providers) ~= "table" then return {} end
-    local providers = {}
-    for _, id in ipairs(M.ids) do
-        local entry = value.providers[id]
-        if type(entry) == "table" and finite(entry.fetched) and type(entry.metrics) == "table" and #entry.metrics <= 8 then
-            local valid = #entry.metrics > 0
-            for _, metric in ipairs(entry.metrics) do
-                if type(metric) ~= "table" or not finite(metric.percent) or metric.percent < 0
-                    or type(metric.label) ~= "string" or #metric.label > 100
-                    or (metric.reset ~= nil and not finite(metric.reset))
-                    or (metric.window ~= nil and not finite(metric.window)) then valid = false end
-            end
-            if valid then
-                local expiries = {}
-                if id == "openai" and type(entry.manualExpiries) == "table" then
-                    for i, expiry in ipairs(entry.manualExpiries) do
-                        if i > 32 then break end
-                        if finite(expiry) and expiry >= 0 then expiries[#expiries + 1] = expiry end
-                    end
-                end
-                providers[id] = { metrics = entry.metrics, fetched = entry.fetched, plan = text(entry.plan, ""), stale = true,
-                    manualResets = id == "openai" and count(entry.manualResets) or nil,
-                    manualExpiries = #expiries > 0 and expiries or nil }
-            end
+    if type(value) ~= "table" or (value.version ~= 1 and value.version ~= 2) or type(value.providers) ~= "table" then return {} end
+    local providers, size = {}, 0
+    for id, saved in pairs(value.providers) do
+        size = size + 1; if size > 128 then break end
+        if validId(id) and type(saved) == "table" and finite(saved.fetched) then
+            local raw = { id = id, name = saved.name or (id == "openai" and "Codex" or id == "opencode-go" and "OpenCode Go" or id),
+                brand = saved.brand, plan = saved.plan, status = "ready", fetched = saved.fetched,
+                metrics = saved.metrics, sections = saved.sections,
+                manualResets = saved.manualResets, manualExpiries = saved.manualExpiries }
+            providers[id] = M.entry(raw, saved.fetched, true)
         end
     end
     return providers
+end
+
+function M.ids(snapshot)
+    local ids, seen = {}, {}
+    local providers = snapshot.providers or {}
+    for _, id in ipairs(snapshot.order or {}) do
+        if providers[id] and not seen[id] then ids[#ids + 1] = id; seen[id] = true end
+    end
+    local extra = {}
+    for id in pairs(providers) do if not seen[id] then extra[#extra + 1] = id end end
+    table.sort(extra)
+    for _, id in ipairs(extra) do ids[#ids + 1] = id end
+    return ids
+end
+
+function M.barId(snapshot)
+    local providers = snapshot.providers or {}
+    if snapshot.barProvider and providers[snapshot.barProvider] then return snapshot.barProvider end
+    if providers.openai then return "openai" end
+    if type(snapshot.primary) == "string" and providers[snapshot.primary] then return snapshot.primary end
+    local ids = M.ids(snapshot)
+    for _, id in ipairs(ids) do if providers[id].hasData then return id end end
+    return ids[1]
+end
+
+function M.glyph(entry)
+    if entry and entry.brand == "openai" then return "brand-openai" end
+    return "brain"
+end
+
+function M.barRows(entry)
+    local rows = {}
+    for _, section in ipairs(entry and entry.sections or {}) do
+        if section.type == "metric" or section.type == "text" then rows[#rows + 1] = section
+        elseif section.type == "block" and #rows == 0 then
+            rows[1] = { type = "text", label = section.label, value = section.body[1] }
+        end
+        if #rows >= 2 then break end
+    end
+    return rows
 end
 
 function M.request()

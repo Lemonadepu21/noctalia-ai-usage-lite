@@ -1,11 +1,11 @@
 [[plugin]]
 id = "pupu/ai-usage-lite"
 name = "AI Usage Lite"
-version = "0.3.0"
+version = "0.4.0"
 plugin_api = 32
 author = "pupu"
 license = "MIT"
 icon = "brain"
-description = "Lightweight Codex and OpenCode Go usage for Noctalia, powered by ai-usagebar CLI."
+description = "AI subscription quotas and API balances for Noctalia, powered by ai-usagebar CLI."
 tags = ["bar", "panel", "ai", "utility"]
 dependencies = ["ai-usagebar", "flock", "timeout"]
