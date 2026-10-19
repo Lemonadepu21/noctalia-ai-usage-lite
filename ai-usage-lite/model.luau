@@ -257,8 +257,30 @@ end
 
 function M.glyph(entry)
     if entry and entry.brand == "openai" then return "brand-openai" end
-    if entry and entry.brand == "opencode-go" then return "code" end
+    if entry and entry.brand == "copilot" then return "brand-github-copilot" end
     return "brain"
+end
+
+local logos = {
+    anthropic = "claude", anthropic_api = "anthropic", ["opencode-go"] = "opencode",
+    zai = "zai", openrouter = "openrouter", deepseek = "deepseek", deepinfra = "deepinfra",
+    kimi = "kimi", kilo = "kilocode", novita = "novita", moonshot = "moonshot",
+    grok = "grok", supergrok = "grok", grokbot = "grok", antigravity = "antigravity",
+    cursor = "cursor", minimax = "minimax", kiro = "kiro", nous = "nousresearch",
+    commandcode = "commandcode", ollama = "ollama", modelstudio = "alibabacloud",
+    devin = "devin", cline = "cline",
+}
+
+function M.logo(entry)
+    local name = entry and logos[entry.brand]
+    if not name then return nil end
+    return "icons/" .. name .. (noctalia.isDarkMode() and "-dark.svg" or "-light.svg")
+end
+
+function M.icon(entry, key, size, color)
+    local path = M.logo(entry)
+    if path then return ui.image({ key = key, path = path, width = size, height = size, fit = "contain" }) end
+    return ui.glyph({ key = key, name = M.glyph(entry), size = size, color = color })
 end
 
 function M.barRows(entry, prefs, id)

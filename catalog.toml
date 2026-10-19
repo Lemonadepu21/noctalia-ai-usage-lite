@@ -1,7 +1,7 @@
 [[plugin]]
 id = "pupu/ai-usage-lite"
 name = "AI Usage Lite"
-version = "0.4.1"
+version = "0.4.2"
 plugin_api = 32
 author = "pupu"
 license = "MIT"

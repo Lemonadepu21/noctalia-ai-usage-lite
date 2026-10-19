@@ -107,6 +107,7 @@ local function harness(cache)
     env.noctalia = {
         getConfig = function(key) return env.config[key] end,
         nowMs = function() return clock * 1000 end,
+        isDarkMode = function() return env.dark ~= false end,
         pluginDataDir = function() return "/plugin-data" end,
         setUpdateInterval = function(ms) env.interval = ms end,
         fileInfo = function() return cache and { size = 100 } or nil end,
@@ -339,6 +340,29 @@ walletBar.noctalia.state.set("snapshot", general); walletBar.noctalia.state.set(
 walletBar.load("bar")
 assert(find(walletBar.barTree, "value").props.text == "$17.60" and not find(walletBar.barTree, "progress"))
 assert(walletBar.tip:find("OpenRouter"))
+assert(walletBar.barTree.children[1].kind == "image")
+assert(walletBar.barTree.children[1].props.path == "icons/openrouter-dark.svg")
+walletBar.dark = false; walletBar.update()
+assert(walletBar.barTree.children[1].props.path == "icons/openrouter-light.svg")
+local logoModel = walletBar.require("./model.luau")
+assert(logoModel.logo({brand="opencode-go"}) == "icons/opencode-light.svg")
+assert(logoModel.logo({brand="deepseek"}) == "icons/deepseek-light.svg")
+assert(logoModel.logo({brand="../../private"}) == nil)
+assert(logoModel.icon({brand="unknown"}, "unknown", 17, "primary").props.name == "brain")
+assert(logoModel.icon({brand="copilot"}, "copilot", 17, "primary").props.name == "brand-github-copilot")
+assert(logoModel.logo(logoModel.entry(money, clock)) == "icons/openrouter-light.svg", "named account lost its brand")
+for brand, name in pairs({anthropic="claude", anthropic_api="anthropic", zai="zai", openrouter="openrouter", deepseek="deepseek",
+    deepinfra="deepinfra", kimi="kimi", kilo="kilocode", novita="novita", moonshot="moonshot", grok="grok", supergrok="grok",
+    grokbot="grok", antigravity="antigravity", cursor="cursor", minimax="minimax", kiro="kiro", nous="nousresearch",
+    ["opencode-go"]="opencode", commandcode="commandcode", ollama="ollama", modelstudio="alibabacloud", devin="devin", cline="cline"}) do
+    for _, dark in ipairs({true, false}) do
+        walletBar.dark = dark
+        local path = logoModel.logo({brand=brand})
+        assert(path == "icons/" .. name .. (dark and "-dark.svg" or "-light.svg"))
+        local asset = assert(io.open(path)); local svg = asset:read("a"); asset:close()
+        assert(svg:find("<svg") and not svg:find("currentColor") and not svg:find("href="), path)
+    end
+end
 assert(bar.config.account_id == "openai" and bar.barTree.children[1].props.name == "brand-openai", "one widget changed another widget's account")
 walletBar.config.account_id = "new-vendor"
 walletBar.noctalia.state.set("snapshot", general)

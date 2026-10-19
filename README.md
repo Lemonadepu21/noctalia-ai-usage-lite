@@ -6,6 +6,7 @@ Noctalia v5 的轻量 AI 用量插件，显示 **订阅剩余额度、重置时�
 
 - 每个状态栏组件绑定一个账户；添加多个组件可同时查看多个账户。
 - 展开页使用 Tab，可勾选要显示的账户和用量项。
+- 状态栏、Tab 和账户列表使用供应商 Logo；图标随插件离线打包，支持深浅主题。
 - 只显示有成功数据的账户；查询暂时失败时保留旧数据并提示状态。
 - 支持手动刷新、成功缓存，以及后端提供的重置卡次数和到期时间。
 
@@ -124,3 +125,5 @@ noctalia msg plugin pupu/ai-usage-lite:poller all refresh
 已在本机验证真实 CLI 查询、Tab 切换和显示开关；API 余额与多账户使用虚构数据做隔离测试，不能视为所有供应商真实查询均已通过。
 
 [CLI 账户配置](docs/ACCOUNTS.md) · [技术说明与测试方法](docs/DEVELOPMENT.md) · [MIT 许可](LICENSE)
+
+供应商 SVG 来自 [Lobe Icons](https://github.com/lobehub/lobe-icons)（MIT）；来源版本、修改及覆盖范围见 [图标说明](ai-usage-lite/icons/README.md)。

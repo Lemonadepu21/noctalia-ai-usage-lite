@@ -11,7 +11,8 @@ function update()
     local stale = entry and entry.hasData and (entry.stale or time - entry.fetched > model.refreshSeconds() * 2 or errorText)
     local width = model.settingInt("progress_width", 40, 24, 100)
     local countdown = noctalia.getConfig("show_countdown") ~= false
-    local signature = { id or "none", entry and "data" or tostring(snapshot.busy), tostring(width), tostring(countdown) }
+    local signature = { id or "none", entry and "data" or tostring(snapshot.busy), tostring(width), tostring(countdown),
+        model.logo(entry) or model.glyph(entry) }
     local rows, tips = {}, { (entry and entry.name or "AI 用量") .. "\n点击查看详情 · 右键刷新" }
     if entry then
         for i, metric in ipairs(model.barRows(entry, snapshot.preferences, id)) do
@@ -50,7 +51,7 @@ function update()
     local view = table.concat(signature, "|")
     if view ~= previousView then
         local children = {
-            ui.glyph({ key = "provider", name = model.glyph(entry), size = 17, color = "on_surface" }),
+            model.icon(entry, "provider", 17, "on_surface"),
             ui.column({ key = "windows", gap = 0 }, rows),
         }
         local container = barWidget.isVertical() and ui.column or ui.row

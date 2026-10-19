@@ -95,8 +95,7 @@ local function tabsView(providers)
             justify = "center", align = "center", fill = active and "primary/0.12" or "on_surface/0.025",
             border = active and "primary/0.25" or "outline/0.08", borderWidth = 1,
             tooltip = providers[id].name, onClick = accountActions(id).select }, {
-            ui.glyph({ key = "icon", name = model.glyph(providers[id]), size = 15,
-                color = active and "primary" or "on_surface_variant" }),
+            model.icon(providers[id], "icon", 15, active and "primary" or "on_surface_variant"),
             label("title", providers[id].name, active and "primary" or "on_surface_variant", 12, "semibold"),
         })
         if i % 2 == 0 or i == #tabIds then
@@ -113,6 +112,7 @@ local function settingsView(providers, available, entry)
     for _, id in ipairs(available) do
         rows[#rows + 1] = ui.row({ key = "account-" .. id, gap = 8, align = "center", padding = 8, radius = 8,
             fill = selected == id and "primary/0.08" or "surface_variant/0.15" }, {
+            model.icon(providers[id], "icon", 17, "on_surface"),
             ui.column({ key = "name", flexGrow = 1, gap = 3, onClick = accountActions(id).select }, {
                 label("title", providers[id].name, "on_surface", 12, "semibold"),
                 label("id", id, "on_surface_variant", 10),
@@ -204,7 +204,7 @@ render = function()
         end
     else
         cards[#cards + 1] = ui.column({ key = "empty", gap = 10, padding = 25, align = "center" }, {
-            ui.glyph({ key = "icon", name = model.glyph(entry), size = 28, color = "on_surface_variant" }),
+            model.icon(entry, "icon", 28, "on_surface_variant"),
             label("message", snapshot.busy and "正在查询用量…" or #available > 0 and "请在右上角选择显示的用量" or "暂无可用数据", "on_surface_variant", 12),
         })
     end
@@ -212,7 +212,7 @@ render = function()
     panel.render(ui.column({ key = "root", gap = 12, padding = 14, flexGrow = 1 }, {
         ui.row({ key = "heading", gap = 8, align = "center" }, {
             ui.row({ key = "badge", width = 28, height = 28, radius = 8, fill = "primary/0.10", align = "center", justify = "center" }, {
-                ui.glyph({ key = "icon", name = model.glyph(entry), size = 17, color = "primary" }),
+                model.icon(entry, "icon", 17, "primary"),
             }),
             label("title", managing and "显示设置" or "AI 用量", "on_surface", 14, "bold"),
             ui.spacer({ key = "space", flexGrow = 1 }),
